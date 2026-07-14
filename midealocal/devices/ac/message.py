@@ -963,11 +963,24 @@ class XBXMessageBody(NewProtocolMessageBody):
             )
         # AC subtype 8 (e.g. model 22013279) reports temperatures in the
         # 0x7e new-protocol tag; the standard C0 frame is stale for it.
-        # https://github.com/wuwentao/midea_ac_lan  (synced-sample analysis)
+        # Synced captures show setpoint in _t[1]:
+        # - low 6 bits encode 0.5C steps with +11.5C offset
+        # - bit 0x40 adds an extra +0.5C
         if 0x7E in params:
             _t = params[0x7E]
             if len(_t) > 41:
-                self.target_temperature = (_t[3] - 50) / 2
+                # Prefer observed subtype-8 mapping from byte 1.
+                raw_setpoint = _t[1]
+                target_temperature = 11.5 + (raw_setpoint & 0x3F) / 2
+                if raw_setpoint & 0x40:
+                    target_temperature += 0.5
+                if not 10 <= target_temperature <= 40:
+                    # Fallback for payload variants where legacy byte-3
+                    # mapping is still active.
+                    fallback_target = (_t[3] - 50) / 2
+                    if 10 <= fallback_target <= 40:
+                        target_temperature = fallback_target
+                self.target_temperature = target_temperature
                 self.indoor_temperature = round(
                     (_t[40] - 50) / 2 + _t[41] * 0.1, 1
                 )
